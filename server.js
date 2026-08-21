@@ -26,7 +26,7 @@ function mtlsRequest(options, body, certBase64, certPassword) {
 }
 
 async function getAccessToken(clientId, clientSecret, certBase64, certPassword, sandbox) {
-  const host = sandbox ? "api-sandbox.c6bank.com" : "api.c6bank.com";
+        const host = sandbox ? "baas-api-sandbox.c6bank.info" : "baas-api.c6bank.info";
   const auth = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
 
   const result = await mtlsRequest(
@@ -90,7 +90,7 @@ const server = http.createServer(async (req, res) => {
         }
 
         const accessToken = await getAccessToken(clientId, clientSecret, certPfx, certPassword, sandbox);
-        const host = sandbox ? "api-sandbox.c6bank.com" : "api.c6bank.com";
+  const host = sandbox ? "baas-api-sandbox.c6bank.info" : "baas-api.c6bank.info";
 
         const boletoBody = {
           external_reference: externalRef,
@@ -114,7 +114,7 @@ const server = http.createServer(async (req, res) => {
           {
             hostname: host,
             port: 443,
-            path: "/boleto/v1/boletos",
+            path: "/v1/bank_slips",
             method: "POST",
             headers: {
               Authorization: `Bearer ${accessToken}`,
