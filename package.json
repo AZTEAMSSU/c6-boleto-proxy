@@ -1,0 +1,12 @@
+{
+  "name": "c6-boleto-proxy",
+  "version": "1.0.0",
+  "description": "C6 Bank boleto mTLS proxy",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
