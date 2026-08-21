@@ -3,13 +3,13 @@ const http = require("http");
 
 const PORT = process.env.PORT || 3000;
 
-function mtlsRequest(options, body, certBase64, certPassword) {
+function mtlsRequest(options, body, certPem, keyPem) {
   return new Promise((resolve, reject) => {
     const req = https.request(
       {
         ...options,
-        pfx: Buffer.from(certBase64, "base64"),
-        passphrase: certPassword,
+        cert: Buffer.from(certPem, "base64"),
+        key: Buffer.from(keyPem, "base64"),
         rejectUnauthorized: false,
       },
       (res) => {
@@ -25,8 +25,8 @@ function mtlsRequest(options, body, certBase64, certPassword) {
   });
 }
 
-async function getAccessToken(clientId, clientSecret, certBase64, certPassword, sandbox) {
-        const host = sandbox ? "baas-api-sandbox.c6bank.info" : "baas-api.c6bank.info";
+async function getAccessToken(clientId, clientSecret, certPem, keyPem, sandbox) {
+  const host = sandbox ? "baas-api-sandbox.c6bank.info" : "baas-api.c6bank.info";
   const auth = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
 
   const result = await mtlsRequest(
@@ -41,8 +41,8 @@ async function getAccessToken(clientId, clientSecret, certBase64, certPassword, 
       },
     },
     "grant_type=client_credentials",
-    certBase64,
-    certPassword
+    certPem,
+    keyPem
   );
 
   if (result.status < 200 || result.status >= 300) {
@@ -73,14 +73,14 @@ const server = http.createServer(async (req, res) => {
       try {
         const data = JSON.parse(body);
         const {
-          clientId, clientSecret, certPfx, certPassword, sandbox,
+          clientId, clientSecret, certPem, keyPem, sandbox,
           externalRef, amount, dueDate, payerName, payerDocument,
           payerStreet, payerNumber, payerCity, payerState, payerZip, payerEmail,
         } = data;
 
-        if (!clientId || !clientSecret || !certPfx || !certPassword) {
+        if (!clientId || !clientSecret || !certPem || !keyPem) {
           res.writeHead(400, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: "Credenciais C6 incompletas" }));
+          res.end(JSON.stringify({ error: "Credenciais C6 incompletas (clientId, clientSecret, certPem, keyPem)" }));
           return;
         }
         if (!externalRef || !amount || !dueDate || !payerName || !payerDocument) {
@@ -89,8 +89,8 @@ const server = http.createServer(async (req, res) => {
           return;
         }
 
-        const accessToken = await getAccessToken(clientId, clientSecret, certPfx, certPassword, sandbox);
-  const host = sandbox ? "baas-api-sandbox.c6bank.info" : "baas-api.c6bank.info";
+        const accessToken = await getAccessToken(clientId, clientSecret, certPem, keyPem, sandbox);
+        const host = sandbox ? "baas-api-sandbox.c6bank.info" : "baas-api.c6bank.info";
 
         const boletoBody = {
           external_reference: externalRef,
@@ -122,8 +122,8 @@ const server = http.createServer(async (req, res) => {
             },
           },
           JSON.stringify(boletoBody),
-          certPfx,
-          certPassword
+          certPem,
+          keyPem
         );
 
         if (boletoResult.status < 200 || boletoResult.status >= 300) {
