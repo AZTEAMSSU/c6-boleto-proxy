@@ -76,6 +76,26 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "GET" && req.url === "/debug") { json(res, 200, lastDebug); return; }
   if (req.method === "GET" && req.url === "/health") { json(res, 200, { status: "ok" }); return; }
 
+  if (req.method === "POST" && req.url === "/shorten") {
+    try {
+      const d = await parseBody(req);
+      const { url } = d;
+      if (!url) return json(res, 400, { error: "url obrigatório" });
+      const body = "url=" + encodeURIComponent(url);
+      const result = await new Promise((resolve, reject) => {
+        const r = https.request({ hostname: "cleanuri.com", port: 443, path: "/api/v1/shorten", method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded", "Content-Length": Buffer.byteLength(body) } }, (res) => { let data = ""; res.on("data", c => data += c); res.on("end", () => resolve({ status: res.statusCode, body: data })); });
+        r.on("error", reject);
+        r.setTimeout(10000, () => { r.destroy(); reject(new Error("Timeout")); });
+        r.write(body);
+        r.end();
+      });
+      if (result.status < 200 || result.status >= 300) return json(res, 502, { error: "cleanuri erro " + result.status });
+      const j = JSON.parse(result.body);
+      json(res, 200, { shortUrl: j.result_url || url });
+    } catch (e) { json(res, 500, { error: e.message }); }
+    return;
+  }
+
   if (req.method === "GET" && req.url.startsWith("/shared/")) {
     const token = req.url.split("/shared/")[1];
     const entry = sharedPdfs[token];
