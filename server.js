@@ -81,12 +81,19 @@ const server = http.createServer(async (req, res) => {
       const d = await parseBody(req);
       const { url } = d;
       if (!url) return json(res, 400, { error: "url obrigatório" });
-      const tinyUrl = "https://tinyurl.com/api-create.php?url=" + encodeURIComponent(url);
+      const postData = "url=" + encodeURIComponent(url);
+      const options = {
+        hostname: "cleanuri.com", path: "/api/v1/shorten", method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded", "Content-Length": Buffer.byteLength(postData) }
+      };
       const result = await new Promise((resolve, reject) => {
-        https.get(tinyUrl, (r) => { let data = ""; r.on("data", c => data += c); r.on("end", () => resolve({ status: r.statusCode, body: data })); }).on("error", reject);
+        const r = https.request(options, (res2) => { let data = ""; res2.on("data", c => data += c); res2.on("end", () => resolve({ status: res2.statusCode, body: data })); });
+        r.on("error", reject); r.write(postData); r.end();
       });
-      if (result.status < 200 || result.status >= 300 || !result.body.startsWith("http")) return json(res, 502, { error: "tinyurl erro " + result.status });
-      json(res, 200, { shortUrl: result.body.trim() });
+      if (result.status < 200 || result.status >= 300) return json(res, 502, { error: "cleanuri erro " + result.status + " " + result.body });
+      const parsed = JSON.parse(result.body);
+      if (!parsed.result_url) return json(res, 502, { error: "cleanuri sem resultado" });
+      json(res, 200, { shortUrl: parsed.result_url });
     } catch (e) { json(res, 500, { error: e.message }); }
     return;
   }
