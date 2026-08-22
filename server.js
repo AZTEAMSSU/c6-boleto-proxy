@@ -122,23 +122,17 @@ const server = http.createServer(async (req, res) => {
     req.on("data", (chunk) => chunks.push(chunk));
     req.on("end", () => {
       try {
-        const boundary = "----FormBoundary" + Math.random().toString(36).substring(2);
         const pdfBuffer = Buffer.concat(chunks);
-        const header = Buffer.from(
-          "--" + boundary + "\r\n" +
-          'Content-Disposition: form-data; name="reqtype"\r\n\r\nfileupload\r\n' +
-          "--" + boundary + "\r\n" +
-          'Content-Disposition: form-data; name="time"\r\n\r\n24h\r\n' +
-          "--" + boundary + "\r\n" +
-          'Content-Disposition: form-data; name="fileToUpload"; filename="boleto.pdf"\r\n' +
-          "Content-Type: application/pdf\r\n\r\n"
-        );
-        const footer = Buffer.from("\r\n--" + boundary + "--\r\n");
-        const body = Buffer.concat([header, pdfBuffer, footer]);
+        const boundary = "----FormBoundary" + Math.random().toString(36).substring(2);
+        const parts = [];
+        parts.push(Buffer.from("--" + boundary + "\r\nContent-Disposition: form-data; name=\"file\"; filename=\"boleto.pdf\"\r\nContent-Type: application/pdf\r\n\r\n"));
+        parts.push(pdfBuffer);
+        parts.push(Buffer.from("\r\n--" + boundary + "--\r\n"));
+        const body = Buffer.concat(parts);
         const reqOpts = {
-          hostname: "catbox.moe",
+          hostname: "0x0.st",
           port: 443,
-          path: "/user/api.php",
+          path: "/",
           method: "POST",
           headers: { "Content-Type": "multipart/form-data; boundary=" + boundary, "Content-Length": body.length }
         };
@@ -154,6 +148,7 @@ const server = http.createServer(async (req, res) => {
             }
           });
         });
+        proxyReq.setTimeout(60000, () => { proxyReq.destroy(); json(res, 500, { error: "Upload timeout" }); });
         proxyReq.on("error", (e) => json(res, 500, { error: e.message }));
         proxyReq.write(body);
         proxyReq.end();
@@ -165,3 +160,4 @@ const server = http.createServer(async (req, res) => {
   }
 });
 server.listen(PORT, () => { console.log("C6 proxy on port " + PORT); });
+
