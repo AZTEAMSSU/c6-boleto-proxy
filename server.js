@@ -55,7 +55,8 @@ const server = http.createServer(async (req, res) => {
         const accessToken = await getAccessToken(clientId, clientSecret, certPem, keyPem, sandbox);
         const host = sandbox ? "baas-api-sandbox.c6bank.info" : "baas-api.c6bank.info";
 
-        const boletoBody = { external_reference_id: externalRef, amount: parseFloat(amount), due_date: dueDate, payer: { name: payerName, tax_id: payerDocument.replace(/\D/g, ""), address: { street: payerStreet || "", number: parseInt(payerNumber) || 0, city: payerCity || "", state: payerState || "", zip_code: (payerZip || "").replace(/\D/g, "") } } };
+        const extRefShort = externalRef.replace(/[^a-zA-Z0-9]/g, "").substring(0, 10);
+        const boletoBody = { external_reference_id: extRefShort, amount: parseFloat(amount), due_date: dueDate, payer: { name: payerName, tax_id: payerDocument.replace(/\D/g, ""), address: { street: payerStreet || "", number: parseInt(payerNumber) || 0, city: payerCity || "", state: payerState || "", zip_code: (payerZip || "").replace(/\D/g, "") } } };
         if (payerEmail) boletoBody.payer.email = payerEmail;
 
         lastDebug.requests.push({ ts: new Date().toISOString(), endpoint: "boleto", url: "https://" + host + "/v1/bank_slips", body: JSON.stringify(boletoBody) });
