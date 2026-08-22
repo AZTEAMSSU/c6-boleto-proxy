@@ -1,5 +1,6 @@
 ﻿const https = require("https");
 const http = require("http");
+const { URL } = require("url");
 const PORT = process.env.PORT || 3000;
 const HOST = "baas-api.c6bank.info";
 let lastDebug = { requests: [], errors: [] };
@@ -115,6 +116,49 @@ const server = http.createServer(async (req, res) => {
       if (r.status < 200 || r.status >= 300) { let msg; try { msg = JSON.parse(rBody).detail || JSON.parse(rBody).message || rBody; } catch(e) { msg = rBody; } return json(res, r.status, { error: "Erro cancelar: " + r.status + " " + msg }); }
       json(res, 200, { success: true, message: "Boleto cancelado" });
     } catch (e) { lastDebug.errors.push({ ts: new Date().toISOString(), msg: e.message }); json(res, 500, { error: e.message }); }
+
+  } else if (req.method === "POST" && req.url === "/upload-pdf") {
+    const chunks = [];
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("end", () => {
+      try {
+        const boundary = "----FormBoundary" + Math.random().toString(36).substring(2);
+        const pdfBuffer = Buffer.concat(chunks);
+        const header = Buffer.from(
+          "--" + boundary + "\r\n" +
+          'Content-Disposition: form-data; name="reqtype"\r\n\r\nfileupload\r\n' +
+          "--" + boundary + "\r\n" +
+          'Content-Disposition: form-data; name="time"\r\n\r\n24h\r\n' +
+          "--" + boundary + "\r\n" +
+          'Content-Disposition: form-data; name="fileToUpload"; filename="boleto.pdf"\r\n' +
+          "Content-Type: application/pdf\r\n\r\n"
+        );
+        const footer = Buffer.from("\r\n--" + boundary + "--\r\n");
+        const body = Buffer.concat([header, pdfBuffer, footer]);
+        const reqOpts = {
+          hostname: "catbox.moe",
+          port: 443,
+          path: "/user/api.php",
+          method: "POST",
+          headers: { "Content-Type": "multipart/form-data; boundary=" + boundary, "Content-Length": body.length }
+        };
+        const proxyReq = https.request(reqOpts, (proxyRes) => {
+          let data = "";
+          proxyRes.on("data", (c) => (data += c));
+          proxyRes.on("end", () => {
+            const url = data.trim();
+            if (url.startsWith("http")) {
+              json(res, 200, { url: url });
+            } else {
+              json(res, 500, { error: "Upload falhou: " + data });
+            }
+          });
+        });
+        proxyReq.on("error", (e) => json(res, 500, { error: e.message }));
+        proxyReq.write(body);
+        proxyReq.end();
+      } catch (e) { json(res, 500, { error: e.message }); }
+    });
 
   } else {
     json(res, 404, { error: "Not found" });
