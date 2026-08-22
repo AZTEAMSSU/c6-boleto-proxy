@@ -1,9 +1,10 @@
 ﻿const https = require("https");
 const http = require("http");
-const { URL } = require("url");
+const crypto = require("crypto");
 const PORT = process.env.PORT || 3000;
 const HOST = "baas-api.c6bank.info";
 let lastDebug = { requests: [], errors: [] };
+const sharedPdfs = {};
 
 function mtlsRequest(options, body, certPem, keyPem) {
   return new Promise((resolve, reject) => {
@@ -59,6 +60,13 @@ function json(res, status, obj) {
   res.end(JSON.stringify(obj));
 }
 
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of Object.entries(sharedPdfs)) {
+    if (now - v.ts > 24 * 60 * 60 * 1000) delete sharedPdfs[k];
+  }
+}, 60 * 60 * 1000);
+
 const server = http.createServer(async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT");
@@ -67,6 +75,15 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === "GET" && req.url === "/debug") { json(res, 200, lastDebug); return; }
   if (req.method === "GET" && req.url === "/health") { json(res, 200, { status: "ok" }); return; }
+
+  if (req.method === "GET" && req.url.startsWith("/shared/")) {
+    const token = req.url.split("/shared/")[1];
+    const entry = sharedPdfs[token];
+    if (!entry) { res.writeHead(404); res.end("Not found or expired"); return; }
+    res.writeHead(200, { "Content-Type": "application/pdf", "Content-Disposition": "inline; filename=boleto.pdf", "Content-Length": entry.data.length });
+    res.end(entry.data);
+    return;
+  }
 
   if (req.method === "POST" && req.url === "/boleto") {
     try {
@@ -103,6 +120,24 @@ const server = http.createServer(async (req, res) => {
       res.end(r.body);
     } catch (e) { json(res, 500, { error: e.message }); }
 
+  } else if (req.method === "POST" && req.url === "/share-pdf") {
+    try {
+      const d = await parseBody(req);
+      const { clientId, clientSecret, certPem, keyPem, boletoId } = d;
+      if (!clientId || !clientSecret || !certPem || !keyPem || !boletoId) return json(res, 400, { error: "Parametros incompletos" });
+      const accessToken = await getAccessToken(clientId, clientSecret, certPem, keyPem);
+      const r = await mtlsRequestBinary({ hostname: HOST, port: 443, path: "/v1/bank_slips/" + boletoId + "/pdf", method: "GET", headers: { Authorization: "Bearer " + accessToken } }, null, certPem, keyPem);
+      if (r.status < 200 || r.status >= 300) {
+        let msg;
+        try { msg = JSON.parse(r.body.toString()).detail || r.body.toString(); } catch(e) { msg = r.body.toString(); }
+        return json(res, r.status, { error: "Erro PDF: " + r.status + " " + msg });
+      }
+      const token = crypto.randomBytes(16).toString("hex");
+      sharedPdfs[token] = { data: r.body, ts: Date.now() };
+      const baseUrl = "https://c6-boleto-proxy.onrender.com";
+      json(res, 200, { url: baseUrl + "/shared/" + token });
+    } catch (e) { json(res, 500, { error: e.message }); }
+
   } else if (req.method === "POST" && req.url === "/boleto-cancel") {
     try {
       const d = await parseBody(req);
@@ -117,47 +152,8 @@ const server = http.createServer(async (req, res) => {
       json(res, 200, { success: true, message: "Boleto cancelado" });
     } catch (e) { lastDebug.errors.push({ ts: new Date().toISOString(), msg: e.message }); json(res, 500, { error: e.message }); }
 
-  } else if (req.method === "POST" && req.url === "/upload-pdf") {
-    const chunks = [];
-    req.on("data", (chunk) => chunks.push(chunk));
-    req.on("end", () => {
-      try {
-        const pdfBuffer = Buffer.concat(chunks);
-        const boundary = "----FormBoundary" + Math.random().toString(36).substring(2);
-        const parts = [];
-        parts.push(Buffer.from("--" + boundary + "\r\nContent-Disposition: form-data; name=\"file\"; filename=\"boleto.pdf\"\r\nContent-Type: application/pdf\r\n\r\n"));
-        parts.push(pdfBuffer);
-        parts.push(Buffer.from("\r\n--" + boundary + "--\r\n"));
-        const body = Buffer.concat(parts);
-        const reqOpts = {
-          hostname: "0x0.st",
-          port: 443,
-          path: "/",
-          method: "POST",
-          headers: { "Content-Type": "multipart/form-data; boundary=" + boundary, "Content-Length": body.length }
-        };
-        const proxyReq = https.request(reqOpts, (proxyRes) => {
-          let data = "";
-          proxyRes.on("data", (c) => (data += c));
-          proxyRes.on("end", () => {
-            const url = data.trim();
-            if (url.startsWith("http")) {
-              json(res, 200, { url: url });
-            } else {
-              json(res, 500, { error: "Upload falhou: " + data });
-            }
-          });
-        });
-        proxyReq.setTimeout(60000, () => { proxyReq.destroy(); json(res, 500, { error: "Upload timeout" }); });
-        proxyReq.on("error", (e) => json(res, 500, { error: e.message }));
-        proxyReq.write(body);
-        proxyReq.end();
-      } catch (e) { json(res, 500, { error: e.message }); }
-    });
-
   } else {
     json(res, 404, { error: "Not found" });
   }
 });
 server.listen(PORT, () => { console.log("C6 proxy on port " + PORT); });
-
