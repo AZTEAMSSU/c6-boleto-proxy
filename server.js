@@ -172,3 +172,4 @@ const server = http.createServer(async (req, res) => {
   }
 });
 server.listen(PORT, () => { console.log("C6 proxy on port " + PORT); });
+setInterval(() => { https.get("https://c6-boleto-proxy.onrender.com/health", () => {}).on("error", () => {}); }, 14 * 60 * 1000);
