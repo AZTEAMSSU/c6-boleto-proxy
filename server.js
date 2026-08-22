@@ -81,19 +81,44 @@ const server = http.createServer(async (req, res) => {
       const d = await parseBody(req);
       const { url } = d;
       if (!url) return json(res, 400, { error: "url obrigatório" });
-      const postData = "url=" + encodeURIComponent(url);
-      const options = {
-        hostname: "cleanuri.com", path: "/api/v1/shorten", method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded", "Content-Length": Buffer.byteLength(postData) }
-      };
-      const result = await new Promise((resolve, reject) => {
-        const r = https.request(options, (res2) => { let data = ""; res2.on("data", c => data += c); res2.on("end", () => resolve({ status: res2.statusCode, body: data })); });
-        r.on("error", reject); r.write(postData); r.end();
-      });
-      if (result.status < 200 || result.status >= 300) return json(res, 502, { error: "cleanuri erro " + result.status + " " + result.body });
-      const parsed = JSON.parse(result.body);
-      if (!parsed.result_url) return json(res, 502, { error: "cleanuri sem resultado" });
-      json(res, 200, { shortUrl: parsed.result_url });
+
+      async function shortenShortIo(longUrl) {
+        const body = JSON.stringify({ originalURL: longUrl, domain: "l0vmwb.s.gy" });
+        const opts = { hostname: "api.short.io", path: "/links", method: "POST", headers: { "Content-Type": "application/json", "Authorization": "sk_rqgbHvKWT8mMSxjz", "Content-Length": Buffer.byteLength(body) } };
+        return new Promise((resolve, reject) => {
+          const r = https.request(opts, (res2) => { let d = ""; res2.on("data", c => d += c); res2.on("end", () => resolve({ status: res2.statusCode, body: d })); });
+          r.on("error", reject); r.write(body); r.end();
+        });
+      }
+
+      async function shortenLinkly(longUrl) {
+        const body = JSON.stringify({ workspace_id: 396757, url: longUrl });
+        const opts = { hostname: "app.linklyhq.com", path: "/api/v1/link?api_key=LxsOD4ydSXpiCkPCyGR9vg==", method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) } };
+        return new Promise((resolve, reject) => {
+          const r = https.request(opts, (res2) => { let d = ""; res2.on("data", c => d += c); res2.on("end", () => resolve({ status: res2.statusCode, body: d })); });
+          r.on("error", reject); r.write(body); r.end();
+        });
+      }
+
+      // Try short.io first
+      try {
+        const r1 = await shortenShortIo(url);
+        if (r1.status >= 200 && r1.status < 300) {
+          const p = JSON.parse(r1.body);
+          if (p.shortURL) return json(res, 200, { shortUrl: p.shortURL });
+        }
+      } catch (e) {}
+
+      // Fallback: Linkly
+      try {
+        const r2 = await shortenLinkly(url);
+        if (r2.status >= 200 && r2.status < 300) {
+          const p = JSON.parse(r2.body);
+          if (p.full_url) return json(res, 200, { shortUrl: p.full_url });
+        }
+      } catch (e) {}
+
+      json(res, 200, { shortUrl: url });
     } catch (e) { json(res, 500, { error: e.message }); }
     return;
   }
