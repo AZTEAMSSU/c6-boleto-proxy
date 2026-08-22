@@ -42,7 +42,26 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (req.method === "POST" && req.url === "/boleto") {
+  if (req.method === "POST" && req.url === "/boleto-pdf") {
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", async () => {
+      try {
+        const data = JSON.parse(body);
+        const { clientId, clientSecret, certPem, keyPem, sandbox, boletoId } = data;
+        if (!clientId || !clientSecret || !certPem || !keyPem || !boletoId) { res.writeHead(400, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: "Parametros incompletos" })); return; }
+        const accessToken = await getAccessToken(clientId, clientSecret, certPem, keyPem, sandbox);
+        const host = sandbox ? "baas-api-sandbox.c6bank.info" : "baas-api.c6bank.info";
+        const result = await mtlsRequest({ hostname: host, port: 443, path: "/v1/bank_slips/" + boletoId + "/pdf", method: "GET", headers: { Authorization: "Bearer " + accessToken } }, null, certPem, keyPem);
+        if (result.status < 200 || result.status >= 300) { res.writeHead(result.status, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: "Erro ao buscar PDF: " + result.status })); return; }
+        res.writeHead(200, { "Content-Type": "application/pdf", "Content-Disposition": "inline; filename=boleto.pdf" });
+        res.end(Buffer.from(result.body, "binary"));
+      } catch (e) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+  } else if (req.method === "POST" && req.url === "/boleto") {
     let body = "";
     req.on("data", (chunk) => (body += chunk));
     req.on("end", async () => {
