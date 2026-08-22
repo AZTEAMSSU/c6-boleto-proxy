@@ -60,7 +60,7 @@ function json(res, status, obj) {
 
 const server = http.createServer(async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS, GET, DELETE");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   if (req.method === "OPTIONS") { res.writeHead(204); res.end(); return; }
 
@@ -109,7 +109,7 @@ const server = http.createServer(async (req, res) => {
       if (!clientId || !clientSecret || !certPem || !keyPem || !boletoId) return json(res, 400, { error: "Parametros incompletos" });
       const accessToken = await getAccessToken(clientId, clientSecret, certPem, keyPem);
       lastDebug.requests.push({ ts: new Date().toISOString(), endpoint: "boleto-cancel", body: JSON.stringify({ boletoId }) });
-      const r = await mtlsRequest({ hostname: HOST, port: 443, path: "/v1/bank_slips/" + boletoId, method: "DELETE", headers: { Authorization: "Bearer " + accessToken } }, null, certPem, keyPem);
+      const r = await mtlsRequest({ hostname: HOST, port: 443, path: "/v1/bank_slips/" + boletoId + "/cancel", method: "PUT", headers: { Authorization: "Bearer " + accessToken, "Content-Type": "application/json" } }, null, certPem, keyPem);
       const rBody = typeof r.body === "string" ? r.body : r.body.toString();
       lastDebug.requests.push({ ts: new Date().toISOString(), endpoint: "boleto-cancel-response", status: r.status, body: rBody.substring(0, 500) });
       if (r.status < 200 || r.status >= 300) { let msg; try { msg = JSON.parse(rBody).detail || JSON.parse(rBody).message || rBody; } catch(e) { msg = rBody; } return json(res, r.status, { error: "Erro cancelar: " + r.status + " " + msg }); }
