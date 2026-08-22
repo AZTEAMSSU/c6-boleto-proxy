@@ -140,7 +140,7 @@ const server = http.createServer(async (req, res) => {
       if (!externalRef || !amount || !dueDate || !payerName || !payerDocument) return json(res, 400, { error: "Dados do boleto incompletos" });
       const accessToken = await getAccessToken(clientId, clientSecret, certPem, keyPem);
       const extRefShort = externalRef.replace(/[^a-zA-Z0-9]/g, "").substring(0, 10);
-      const boletoBody = { external_reference_id: extRefShort, amount: parseFloat(amount), due_date: dueDate, payer: { name: payerName, tax_id: payerDocument.replace(/\D/g, ""), address: { street: payerStreet || "", number: parseInt(payerNumber) || 0, city: payerCity || "", state: payerState || "", zip_code: (payerZip || "").replace(/\D/g, "") } } };
+      const boletoBody = { external_reference_id: extRefShort, amount: parseFloat(amount), due_date: dueDate, billing_scheme: "15", payer: { name: payerName, tax_id: payerDocument.replace(/\D/g, ""), address: { street: payerStreet || "", number: parseInt(payerNumber) || 0, city: payerCity || "", state: payerState || "", zip_code: (payerZip || "").replace(/\D/g, "") } } };
       if (payerEmail) boletoBody.payer.email = payerEmail;
       lastDebug.requests.push({ ts: new Date().toISOString(), endpoint: "boleto", body: JSON.stringify(boletoBody) });
       const r = await mtlsRequest({ hostname: HOST, port: 443, path: "/v1/bank_slips", method: "POST", headers: { Authorization: "Bearer " + accessToken, "Content-Type": "application/json" } }, JSON.stringify(boletoBody), certPem, keyPem);
