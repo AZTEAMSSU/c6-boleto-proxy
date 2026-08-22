@@ -21,8 +21,8 @@ function mtlsRequest(options, body, certPem, keyPem) {
 async function getAccessToken(clientId, clientSecret, certPem, keyPem, sandbox) {
   const host = sandbox ? "baas-api-sandbox.c6bank.info" : "baas-api.c6bank.info";
   const auth = Buffer.from(clientId + ":" + clientSecret).toString("base64");
-  const result = await mtlsRequest({ hostname: host, port: 443, path: "/v1/auth/oauth2/token", method: "POST", headers: { Authorization: "Basic " + auth, "Content-Type": "application/x-www-form-urlencoded" } }, "grant_type=client_credentials", certPem, keyPem);
-  lastDebug.requests.push({ ts: new Date().toISOString(), endpoint: "auth", url: "https://" + host + "/v1/auth/oauth2/token", status: result.status, body: result.body.substring(0, 500) });
+  const result = await mtlsRequest({ hostname: host, port: 443, path: "/v1/auth", method: "POST", headers: { Authorization: "Basic " + auth, "Content-Type": "application/x-www-form-urlencoded" } }, "grant_type=client_credentials", certPem, keyPem);
+  lastDebug.requests.push({ ts: new Date().toISOString(), endpoint: "auth", url: "https://" + host + "/v1/auth", status: result.status, body: result.body.substring(0, 500) });
   if (result.status < 200 || result.status >= 300) throw new Error("Auth C6 erro " + result.status + ": " + result.body);
   const json = JSON.parse(result.body);
   const token = json.access_token;
