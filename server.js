@@ -185,7 +185,9 @@ const server = http.createServer(async (req, res) => {
         const bs = result.payment_method && result.payment_method.bank_slip;
         json(res, 200, { success: true, id: extRef, barcode: bs ? bs.bar_code || "" : "", digitableLine: bs ? bs.digitable_line || "" : "", dueDate: result.due_date || dueDate, pdfUrl: "", pixEmv, pixQrUrl, externalRef: extRef, boletoMode: "v2" });
       } else {
-        const boletoBody = { external_reference_id: externalRef || generateExtRef26(), amount: parseFloat(amount), due_date: dueDate, billing_scheme: "15", payer: { name: payerName, tax_id: payerDocument.replace(/\D/g, ""), address: { street: payerStreet || "", number: 0, city: payerCity || "", state: payerState || "", zip_code: (payerZip || "").replace(/\D/g, "") } } };
+        const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+        const extRefV1 = externalRef ? externalRef.replace(/[^a-zA-Z0-9]/g, "").substring(0, 10) : Array.from({length: 10}, () => chars[Math.floor(Math.random() * chars.length)]).join("");
+        const boletoBody = { external_reference_id: extRefV1, amount: parseFloat(amount), due_date: dueDate, billing_scheme: "15", payer: { name: payerName, tax_id: payerDocument.replace(/\D/g, ""), address: { street: payerStreet || "", number: 0, city: payerCity || "", state: payerState || "", zip_code: (payerZip || "").replace(/\D/g, "") } } };
         if (payerEmail) boletoBody.payer.email = payerEmail;
 
         lastDebug.requests.push({ ts: new Date().toISOString(), endpoint: "boleto-v1", body: JSON.stringify(boletoBody) });
@@ -194,7 +196,7 @@ const server = http.createServer(async (req, res) => {
         lastDebug.requests.push({ ts: new Date().toISOString(), endpoint: "boleto-v1-response", status: r.status, body: rBody.substring(0, 2000) });
         if (r.status < 200 || r.status >= 300) { let msg; try { const j = JSON.parse(rBody); msg = j.message || j.detail || JSON.stringify(j); } catch(e) { msg = rBody; } lastDebug.errors.push({ ts: new Date().toISOString(), status: r.status, msg }); return json(res, r.status, { error: "C6 erro " + r.status + ": " + msg }); }
         const result = JSON.parse(rBody);
-        json(res, 200, { success: true, id: result.id || "", barcode: result.bar_code || "", digitableLine: result.digitable_line || "", dueDate: result.due_date || dueDate, pdfUrl: result.pdf_url || "", pixEmv: result.emv || result.pix_copia_e_cola || "", pixQrUrl: result.qrcode_url || result.base64 || "", externalRef: result.id || externalRef, boletoMode: "v1" });
+        json(res, 200, { success: true, id: result.id || "", barcode: result.bar_code || "", digitableLine: result.digitable_line || "", dueDate: result.due_date || dueDate, pdfUrl: result.pdf_url || "", pixEmv: result.emv || result.pix_copia_e_cola || "", pixQrUrl: result.qrcode_url || result.base64 || "", externalRef: result.id || extRefV1, boletoMode: "v1" });
       }
     } catch (e) { lastDebug.errors.push({ ts: new Date().toISOString(), msg: e.message }); json(res, 500, { error: e.message }); }
 
