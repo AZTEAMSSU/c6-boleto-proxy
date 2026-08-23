@@ -140,61 +140,74 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "POST" && req.url === "/boleto") {
     try {
       const d = await parseBody(req);
-      const { clientId, clientSecret, certPem, keyPem, externalRef, amount, dueDate, description, payerName, payerDocument, payerStreet, payerCity, payerState, payerZip, payerEmail } = d;
+      const { clientId, clientSecret, certPem, keyPem, externalRef, amount, dueDate, description, payerName, payerDocument, payerStreet, payerCity, payerState, payerZip, payerEmail, boletoMode } = d;
       if (!clientId || !clientSecret || !certPem || !keyPem) return json(res, 400, { error: "Credenciais C6 incompletas" });
       if (!amount || !dueDate || !payerName || !payerDocument) return json(res, 400, { error: "Dados do boleto incompletos" });
       const accessToken = await getAccessToken(clientId, clientSecret, certPem, keyPem);
-      const extRef = generateExtRef26();
 
-      const boletoBody = {
-        external_reference_id: extRef,
-        amount: parseFloat(amount),
-        due_date: dueDate,
-        description: description || "Boleto Gerenciador AzTeam",
-        payer: {
-          name: payerName,
-          tax_id: payerDocument.replace(/\D/g, ""),
-          address: {
-            address: payerStreet || "",
-            neighborhood: "N/D",
-            city: payerCity || "",
-            state: payerState || "",
-            zip_code: (payerZip || "").replace(/\D/g, "")
+      if (boletoMode === "v2") {
+        const extRef = generateExtRef26();
+        const boletoBody = {
+          external_reference_id: extRef,
+          amount: parseFloat(amount),
+          due_date: dueDate,
+          description: description || "Boleto Gerenciador AzTeam",
+          payer: {
+            name: payerName,
+            tax_id: payerDocument.replace(/\D/g, ""),
+            address: {
+              address: payerStreet || "",
+              neighborhood: "N/D",
+              city: payerCity || "",
+              state: payerState || "",
+              zip_code: (payerZip || "").replace(/\D/g, "")
+            }
+          },
+          payment_method: {
+            bank_slip: {
+              billing_scheme: "15"
+            }
           }
-        },
-        payment_method: {
-          bank_slip: {
-            billing_scheme: "15"
-          }
+        };
+        if (payerEmail) boletoBody.payer.email = payerEmail;
+
+        lastDebug.requests.push({ ts: new Date().toISOString(), endpoint: "boleto-v2", body: JSON.stringify(boletoBody) });
+        const r = await mtlsRequest({ hostname: HOST, port: 443, path: "/v2/bank_slips", method: "POST", headers: { Authorization: "Bearer " + accessToken, "Content-Type": "application/json", "partner-software-name": "Gerenciador AzTeam", "partner-software-version": "2.0" } }, JSON.stringify(boletoBody), certPem, keyPem);
+        const rBody = typeof r.body === "string" ? r.body : r.body.toString();
+        lastDebug.requests.push({ ts: new Date().toISOString(), endpoint: "boleto-v2-response", status: r.status, body: rBody.substring(0, 2000) });
+        if (r.status < 200 || r.status >= 300) { let msg; try { const j = JSON.parse(rBody); msg = j.message || j.detail || JSON.stringify(j); } catch(e) { msg = rBody; } lastDebug.errors.push({ ts: new Date().toISOString(), status: r.status, msg }); return json(res, r.status, { error: "C6 erro " + r.status + ": " + msg }); }
+        const result = JSON.parse(rBody);
+        let pixEmv = "", pixQrUrl = "";
+        if (result.payment_method && result.payment_method.pix) {
+          pixEmv = result.payment_method.pix.qr_code || "";
+          pixQrUrl = result.payment_method.pix.image_content || "";
         }
-      };
+        const bs = result.payment_method && result.payment_method.bank_slip;
+        json(res, 200, { success: true, id: extRef, barcode: bs ? bs.bar_code || "" : "", digitableLine: bs ? bs.digitable_line || "" : "", dueDate: result.due_date || dueDate, pdfUrl: "", pixEmv, pixQrUrl, externalRef: extRef, boletoMode: "v2" });
+      } else {
+        const boletoBody = { external_reference_id: externalRef || generateExtRef26(), amount: parseFloat(amount), due_date: dueDate, billing_scheme: "15", payer: { name: payerName, tax_id: payerDocument.replace(/\D/g, ""), address: { street: payerStreet || "", number: 0, city: payerCity || "", state: payerState || "", zip_code: (payerZip || "").replace(/\D/g, "") } } };
+        if (payerEmail) boletoBody.payer.email = payerEmail;
 
-      if (payerEmail) boletoBody.payer.email = payerEmail;
-
-      lastDebug.requests.push({ ts: new Date().toISOString(), endpoint: "boleto", body: JSON.stringify(boletoBody) });
-      const r = await mtlsRequest({ hostname: HOST, port: 443, path: "/v2/bank_slips", method: "POST", headers: { Authorization: "Bearer " + accessToken, "Content-Type": "application/json", "partner-software-name": "Gerenciador AzTeam", "partner-software-version": "2.0" } }, JSON.stringify(boletoBody), certPem, keyPem);
-      const rBody = typeof r.body === "string" ? r.body : r.body.toString();
-      lastDebug.requests.push({ ts: new Date().toISOString(), endpoint: "boleto-response", status: r.status, body: rBody.substring(0, 2000) });
-      if (r.status < 200 || r.status >= 300) { let msg; try { const j = JSON.parse(rBody); msg = j.message || j.detail || JSON.stringify(j); } catch(e) { msg = rBody; } lastDebug.errors.push({ ts: new Date().toISOString(), status: r.status, msg }); return json(res, r.status, { error: "C6 erro " + r.status + ": " + msg }); }
-      const result = JSON.parse(rBody);
-
-      let pixEmv = "";
-      let pixQrUrl = "";
-      if (result.payment_method && result.payment_method.pix) {
-        pixEmv = result.payment_method.pix.qr_code || "";
-        pixQrUrl = result.payment_method.pix.image_content || "";
+        lastDebug.requests.push({ ts: new Date().toISOString(), endpoint: "boleto-v1", body: JSON.stringify(boletoBody) });
+        const r = await mtlsRequest({ hostname: HOST, port: 443, path: "/v1/bank_slips", method: "POST", headers: { Authorization: "Bearer " + accessToken, "Content-Type": "application/json" } }, JSON.stringify(boletoBody), certPem, keyPem);
+        const rBody = typeof r.body === "string" ? r.body : r.body.toString();
+        lastDebug.requests.push({ ts: new Date().toISOString(), endpoint: "boleto-v1-response", status: r.status, body: rBody.substring(0, 2000) });
+        if (r.status < 200 || r.status >= 300) { let msg; try { const j = JSON.parse(rBody); msg = j.message || j.detail || JSON.stringify(j); } catch(e) { msg = rBody; } lastDebug.errors.push({ ts: new Date().toISOString(), status: r.status, msg }); return json(res, r.status, { error: "C6 erro " + r.status + ": " + msg }); }
+        const result = JSON.parse(rBody);
+        json(res, 200, { success: true, id: result.id || "", barcode: result.bar_code || "", digitableLine: result.digitable_line || "", dueDate: result.due_date || dueDate, pdfUrl: result.pdf_url || "", pixEmv: result.emv || result.pix_copia_e_cola || "", pixQrUrl: result.qrcode_url || result.base64 || "", externalRef: result.id || externalRef, boletoMode: "v1" });
       }
-
-      json(res, 200, { success: true, id: result.id || extRef, barcode: (result.payment_method && result.payment_method.bank_slip) ? result.payment_method.bank_slip.bar_code || "" : "", digitableLine: (result.payment_method && result.payment_method.bank_slip) ? result.payment_method.bank_slip.digitable_line || "" : "", dueDate: result.due_date || dueDate, pdfUrl: "", pixEmv, pixQrUrl, externalRef: extRef });
     } catch (e) { lastDebug.errors.push({ ts: new Date().toISOString(), msg: e.message }); json(res, 500, { error: e.message }); }
 
   } else if (req.method === "POST" && req.url === "/boleto-pdf") {
     try {
       const d = await parseBody(req);
-      const { clientId, clientSecret, certPem, keyPem, externalRef } = d;
+      const { clientId, clientSecret, certPem, keyPem, externalRef, boletoMode } = d;
       if (!clientId || !clientSecret || !certPem || !keyPem || !externalRef) return json(res, 400, { error: "Parametros incompletos" });
       const accessToken = await getAccessToken(clientId, clientSecret, certPem, keyPem);
-      const r = await mtlsRequestBinary({ hostname: HOST, port: 443, path: "/v2/bank_slips/" + externalRef + "/pdf", method: "GET", headers: { Authorization: "Bearer " + accessToken, "partner-software-name": "Gerenciador AzTeam", "partner-software-version": "2.0" } }, null, certPem, keyPem);
+      const apiPath = boletoMode === "v2" ? "/v2/bank_slips/" + externalRef + "/pdf" : "/v1/bank_slips/" + externalRef + "/pdf";
+      const headers = { Authorization: "Bearer " + accessToken };
+      if (boletoMode === "v2") { headers["partner-software-name"] = "Gerenciador AzTeam"; headers["partner-software-version"] = "2.0"; }
+      const r = await mtlsRequestBinary({ hostname: HOST, port: 443, path: apiPath, method: "GET", headers }, null, certPem, keyPem);
       if (r.status < 200 || r.status >= 300) {
         let msg;
         try { msg = JSON.parse(r.body.toString()).detail || JSON.parse(r.body.toString()).message || r.body.toString(); } catch(e) { msg = r.body.toString(); }
@@ -207,10 +220,13 @@ const server = http.createServer(async (req, res) => {
   } else if (req.method === "POST" && req.url === "/share-pdf") {
     try {
       const d = await parseBody(req);
-      const { clientId, clientSecret, certPem, keyPem, externalRef } = d;
+      const { clientId, clientSecret, certPem, keyPem, externalRef, boletoMode } = d;
       if (!clientId || !clientSecret || !certPem || !keyPem || !externalRef) return json(res, 400, { error: "Parametros incompletos" });
       const accessToken = await getAccessToken(clientId, clientSecret, certPem, keyPem);
-      const r = await mtlsRequestBinary({ hostname: HOST, port: 443, path: "/v2/bank_slips/" + externalRef + "/pdf", method: "GET", headers: { Authorization: "Bearer " + accessToken, "partner-software-name": "Gerenciador AzTeam", "partner-software-version": "2.0" } }, null, certPem, keyPem);
+      const apiPath = boletoMode === "v2" ? "/v2/bank_slips/" + externalRef + "/pdf" : "/v1/bank_slips/" + externalRef + "/pdf";
+      const headers = { Authorization: "Bearer " + accessToken };
+      if (boletoMode === "v2") { headers["partner-software-name"] = "Gerenciador AzTeam"; headers["partner-software-version"] = "2.0"; }
+      const r = await mtlsRequestBinary({ hostname: HOST, port: 443, path: apiPath, method: "GET", headers }, null, certPem, keyPem);
       if (r.status < 200 || r.status >= 300) {
         let msg;
         try { msg = JSON.parse(r.body.toString()).detail || r.body.toString(); } catch(e) { msg = r.body.toString(); }
@@ -225,11 +241,14 @@ const server = http.createServer(async (req, res) => {
   } else if (req.method === "POST" && req.url === "/boleto-cancel") {
     try {
       const d = await parseBody(req);
-      const { clientId, clientSecret, certPem, keyPem, externalRef } = d;
+      const { clientId, clientSecret, certPem, keyPem, externalRef, boletoMode } = d;
       if (!clientId || !clientSecret || !certPem || !keyPem || !externalRef) return json(res, 400, { error: "Parametros incompletos" });
       const accessToken = await getAccessToken(clientId, clientSecret, certPem, keyPem);
-      lastDebug.requests.push({ ts: new Date().toISOString(), endpoint: "boleto-cancel", body: JSON.stringify({ externalRef }) });
-      const r = await mtlsRequest({ hostname: HOST, port: 443, path: "/v2/bank_slips/" + externalRef + "/cancel", method: "PUT", headers: { Authorization: "Bearer " + accessToken, "Content-Type": "application/json", "partner-software-name": "Gerenciador AzTeam", "partner-software-version": "2.0" } }, null, certPem, keyPem);
+      const apiPath = boletoMode === "v2" ? "/v2/bank_slips/" + externalRef + "/cancel" : "/v1/bank_slips/" + externalRef + "/cancel";
+      const headers = { Authorization: "Bearer " + accessToken, "Content-Type": "application/json" };
+      if (boletoMode === "v2") { headers["partner-software-name"] = "Gerenciador AzTeam"; headers["partner-software-version"] = "2.0"; }
+      lastDebug.requests.push({ ts: new Date().toISOString(), endpoint: "boleto-cancel", body: JSON.stringify({ externalRef, boletoMode }) });
+      const r = await mtlsRequest({ hostname: HOST, port: 443, path: apiPath, method: "PUT", headers }, null, certPem, keyPem);
       const rBody = typeof r.body === "string" ? r.body : r.body.toString();
       lastDebug.requests.push({ ts: new Date().toISOString(), endpoint: "boleto-cancel-response", status: r.status, body: rBody.substring(0, 500) });
       if (r.status < 200 || r.status >= 300) { let msg; try { msg = JSON.parse(rBody).detail || JSON.parse(rBody).message || rBody; } catch(e) { msg = rBody; } return json(res, r.status, { error: "Erro cancelar: " + r.status + " " + msg }); }
