@@ -143,21 +143,16 @@ const server = http.createServer(async (req, res) => {
         external_reference_id: extRefShort,
         amount: parseFloat(amount),
         due_date: dueDate,
-        days_after_due_date: 10,
+        billing_scheme: "15",
         payer: {
           name: payerName,
           tax_id: payerDocument.replace(/\D/g, ""),
           address: {
-            address: payerStreet || "",
-            neighborhood: "",
+            street: payerStreet || "",
+            number: parseInt(payerNumber) || 0,
             city: payerCity || "",
             state: payerState || "",
             zip_code: (payerZip || "").replace(/\D/g, "")
-          }
-        },
-        payment_method: {
-          bankslip: {
-            billing_scheme: "15"
           }
         }
       };
@@ -165,7 +160,7 @@ const server = http.createServer(async (req, res) => {
       if (payerEmail) boletoBody.payer.email = payerEmail;
 
       lastDebug.requests.push({ ts: new Date().toISOString(), endpoint: "boleto", body: JSON.stringify(boletoBody) });
-      const r = await mtlsRequest({ hostname: HOST, port: 443, path: "/v2/bank_slips", method: "POST", headers: { Authorization: "Bearer " + accessToken, "Content-Type": "application/json", "partner-software-name": "Gerenciador AzTeam", "partner-software-version": "2.0" } }, JSON.stringify(boletoBody), certPem, keyPem);
+      const r = await mtlsRequest({ hostname: HOST, port: 443, path: "/v1/bank_slips", method: "POST", headers: { Authorization: "Bearer " + accessToken, "Content-Type": "application/json" } }, JSON.stringify(boletoBody), certPem, keyPem);
       const rBody = typeof r.body === "string" ? r.body : r.body.toString();
       lastDebug.requests.push({ ts: new Date().toISOString(), endpoint: "boleto-response", status: r.status, body: rBody.substring(0, 2000) });
       if (r.status < 200 || r.status >= 300) { let msg; try { const j = JSON.parse(rBody); msg = j.message || j.detail || JSON.stringify(j); } catch(e) { msg = rBody; } lastDebug.errors.push({ ts: new Date().toISOString(), status: r.status, msg }); return json(res, r.status, { error: "C6 erro " + r.status + ": " + msg }); }
@@ -189,7 +184,7 @@ const server = http.createServer(async (req, res) => {
       const { clientId, clientSecret, certPem, keyPem, boletoId } = d;
       if (!clientId || !clientSecret || !certPem || !keyPem || !boletoId) return json(res, 400, { error: "Parametros incompletos" });
       const accessToken = await getAccessToken(clientId, clientSecret, certPem, keyPem);
-      const r = await mtlsRequestBinary({ hostname: HOST, port: 443, path: "/v2/bank_slips/" + boletoId + "/pdf", method: "GET", headers: { Authorization: "Bearer " + accessToken, "partner-software-name": "Gerenciador AzTeam", "partner-software-version": "2.0" } }, null, certPem, keyPem);
+      const r = await mtlsRequestBinary({ hostname: HOST, port: 443, path: "/v1/bank_slips/" + boletoId + "/pdf", method: "GET", headers: { Authorization: "Bearer " + accessToken } }, null, certPem, keyPem);
       if (r.status < 200 || r.status >= 300) {
         let msg;
         try { msg = JSON.parse(r.body.toString()).detail || JSON.parse(r.body.toString()).message || r.body.toString(); } catch(e) { msg = r.body.toString(); }
@@ -205,7 +200,7 @@ const server = http.createServer(async (req, res) => {
       const { clientId, clientSecret, certPem, keyPem, boletoId } = d;
       if (!clientId || !clientSecret || !certPem || !keyPem || !boletoId) return json(res, 400, { error: "Parametros incompletos" });
       const accessToken = await getAccessToken(clientId, clientSecret, certPem, keyPem);
-      const r = await mtlsRequestBinary({ hostname: HOST, port: 443, path: "/v2/bank_slips/" + boletoId + "/pdf", method: "GET", headers: { Authorization: "Bearer " + accessToken, "partner-software-name": "Gerenciador AzTeam", "partner-software-version": "2.0" } }, null, certPem, keyPem);
+      const r = await mtlsRequestBinary({ hostname: HOST, port: 443, path: "/v1/bank_slips/" + boletoId + "/pdf", method: "GET", headers: { Authorization: "Bearer " + accessToken } }, null, certPem, keyPem);
       if (r.status < 200 || r.status >= 300) {
         let msg;
         try { msg = JSON.parse(r.body.toString()).detail || r.body.toString(); } catch(e) { msg = r.body.toString(); }
@@ -224,7 +219,7 @@ const server = http.createServer(async (req, res) => {
       if (!clientId || !clientSecret || !certPem || !keyPem || !boletoId) return json(res, 400, { error: "Parametros incompletos" });
       const accessToken = await getAccessToken(clientId, clientSecret, certPem, keyPem);
       lastDebug.requests.push({ ts: new Date().toISOString(), endpoint: "boleto-cancel", body: JSON.stringify({ boletoId }) });
-      const r = await mtlsRequest({ hostname: HOST, port: 443, path: "/v2/bank_slips/" + boletoId + "/cancel", method: "PUT", headers: { Authorization: "Bearer " + accessToken, "Content-Type": "application/json", "partner-software-name": "Gerenciador AzTeam", "partner-software-version": "2.0" } }, null, certPem, keyPem);
+      const r = await mtlsRequest({ hostname: HOST, port: 443, path: "/v1/bank_slips/" + boletoId + "/cancel", method: "PUT", headers: { Authorization: "Bearer " + accessToken, "Content-Type": "application/json" } }, null, certPem, keyPem);
       const rBody = typeof r.body === "string" ? r.body : r.body.toString();
       lastDebug.requests.push({ ts: new Date().toISOString(), endpoint: "boleto-cancel-response", status: r.status, body: rBody.substring(0, 500) });
       if (r.status < 200 || r.status >= 300) { let msg; try { msg = JSON.parse(rBody).detail || JSON.parse(rBody).message || rBody; } catch(e) { msg = rBody; } return json(res, r.status, { error: "Erro cancelar: " + r.status + " " + msg }); }
