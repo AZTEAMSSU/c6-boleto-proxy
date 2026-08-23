@@ -140,7 +140,7 @@ const server = http.createServer(async (req, res) => {
       if (!externalRef || !amount || !dueDate || !payerName || !payerDocument) return json(res, 400, { error: "Dados do boleto incompletos" });
       const accessToken = await getAccessToken(clientId, clientSecret, certPem, keyPem);
       const extRefShort = externalRef.replace(/[^a-zA-Z0-9]/g, "").substring(0, 10);
-      const boletoBody = { external_reference_id: extRefShort, amount: parseFloat(amount), due_date: dueDate, billing_scheme: "15", payer: { name: payerName, tax_id: payerDocument.replace(/\D/g, ""), address: { street: payerStreet || "", number: parseInt(payerNumber) || 0, city: payerCity || "", state: payerState || "", zip_code: (payerZip || "").replace(/\D/g, "") } } };
+      const boletoBody = { external_reference_id: extRefShort, amount: parseFloat(amount), due_date: dueDate, billing_scheme: "15", gerarPix: true, payer: { name: payerName, tax_id: payerDocument.replace(/\D/g, ""), address: { street: payerStreet || "", number: parseInt(payerNumber) || 0, city: payerCity || "", state: payerState || "", zip_code: (payerZip || "").replace(/\D/g, "") } } };
       if (payerEmail) boletoBody.payer.email = payerEmail;
       lastDebug.requests.push({ ts: new Date().toISOString(), endpoint: "boleto", body: JSON.stringify(boletoBody) });
       const r = await mtlsRequest({ hostname: HOST, port: 443, path: "/v1/bank_slips", method: "POST", headers: { Authorization: "Bearer " + accessToken, "Content-Type": "application/json" } }, JSON.stringify(boletoBody), certPem, keyPem);
@@ -148,7 +148,7 @@ const server = http.createServer(async (req, res) => {
       lastDebug.requests.push({ ts: new Date().toISOString(), endpoint: "boleto-response", status: r.status, body: rBody.substring(0, 1000) });
       if (r.status < 200 || r.status >= 300) { let msg; try { const j = JSON.parse(rBody); msg = j.message || j.detail || JSON.stringify(j); } catch(e) { msg = rBody; } lastDebug.errors.push({ ts: new Date().toISOString(), status: r.status, msg }); return json(res, r.status, { error: "C6 erro " + r.status + ": " + msg }); }
       const result = JSON.parse(rBody);
-      json(res, 200, { success: true, id: result.id || "", barcode: result.bar_code || "", digitableLine: result.digitable_line || "", dueDate: result.due_date || dueDate, pdfUrl: result.pdf_url || "" });
+      json(res, 200, { success: true, id: result.id || "", barcode: result.bar_code || "", digitableLine: result.digitable_line || "", dueDate: result.due_date || dueDate, pdfUrl: result.pdf_url || "", pixEmv: result.emv || result.pix_copia_e_cola || "", pixQrUrl: result.qrcode_url || result.base64 || "" });
     } catch (e) { lastDebug.errors.push({ ts: new Date().toISOString(), msg: e.message }); json(res, 500, { error: e.message }); }
 
   } else if (req.method === "POST" && req.url === "/boleto-pdf") {
