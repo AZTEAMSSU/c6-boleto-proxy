@@ -257,6 +257,28 @@ const server = http.createServer(async (req, res) => {
       json(res, 200, { success: true, message: "Boleto cancelado" });
     } catch (e) { lastDebug.errors.push({ ts: new Date().toISOString(), msg: e.message }); json(res, 500, { error: e.message }); }
 
+  } else if (req.method === "POST" && req.url === "/boleto-status") {
+    try {
+      const d = await parseBody(req);
+      const { clientId, clientSecret, certPem, keyPem, externalRef, boletoMode } = d;
+      if (!clientId || !clientSecret || !certPem || !keyPem || !externalRef) return json(res, 400, { error: "Parametros incompletos" });
+      const accessToken = await getAccessToken(clientId, clientSecret, certPem, keyPem);
+      let apiPath;
+      if (boletoMode === "v2") {
+        apiPath = "/v2/bank_slips/" + externalRef;
+      } else {
+        apiPath = "/v1/bank_slips/" + externalRef;
+      }
+      const headers = { Authorization: "Bearer " + accessToken };
+      if (boletoMode === "v2") { headers["partner-software-name"] = "Gerenciador AzTeam"; headers["partner-software-version"] = "2.0"; }
+      const r = await mtlsRequest({ hostname: HOST, port: 443, path: apiPath, method: "GET", headers }, null, certPem, keyPem);
+      const rBody = typeof r.body === "string" ? r.body : r.body.toString();
+      lastDebug.requests.push({ ts: new Date().toISOString(), endpoint: "boleto-status", status: r.status, body: rBody.substring(0, 1000) });
+      if (r.status < 200 || r.status >= 300) { let msg; try { msg = JSON.parse(rBody).detail || JSON.parse(rBody).message || rBody; } catch(e) { msg = rBody; } return json(res, r.status, { error: "Erro consultar: " + r.status + " " + msg }); }
+      const result = JSON.parse(rBody);
+      json(res, 200, { success: true, status: result.status || "UNKNOWN", paid: result.status === "PAID", data: result });
+    } catch (e) { lastDebug.errors.push({ ts: new Date().toISOString(), msg: e.message }); json(res, 500, { error: e.message }); }
+
   } else {
     json(res, 404, { error: "Not found" });
   }
