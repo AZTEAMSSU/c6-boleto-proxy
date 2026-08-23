@@ -133,7 +133,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "POST" && req.url === "/boleto") {
     try {
       const d = await parseBody(req);
-      const { clientId, clientSecret, certPem, keyPem, externalRef, amount, dueDate, payerName, payerDocument, payerStreet, payerNumber, payerCity, payerState, payerZip, payerEmail, pixKey, pixKeyType } = d;
+      const { clientId, clientSecret, certPem, keyPem, externalRef, amount, dueDate, payerName, payerDocument, payerStreet, payerNumber, payerCity, payerState, payerZip, payerEmail } = d;
       if (!clientId || !clientSecret || !certPem || !keyPem) return json(res, 400, { error: "Credenciais C6 incompletas" });
       if (!externalRef || !amount || !dueDate || !payerName || !payerDocument) return json(res, 400, { error: "Dados do boleto incompletos" });
       const accessToken = await getAccessToken(clientId, clientSecret, certPem, keyPem);
@@ -163,14 +163,6 @@ const server = http.createServer(async (req, res) => {
       };
 
       if (payerEmail) boletoBody.payer.email = payerEmail;
-
-      if (pixKey && pixKeyType) {
-        const pixTypeMap = { "Celular": "CELLPHONE", "CPF": "CPF", "CNPJ": "CNPJ", "Email": "EMAIL", "Chave Aleatoria": "RANDOM_KEY" };
-        boletoBody.payment_method.pix = {
-          key: pixKey,
-          type: pixTypeMap[pixKeyType] || pixKeyType
-        };
-      }
 
       lastDebug.requests.push({ ts: new Date().toISOString(), endpoint: "boleto", body: JSON.stringify(boletoBody) });
       const r = await mtlsRequest({ hostname: HOST, port: 443, path: "/v2/bank_slips", method: "POST", headers: { Authorization: "Bearer " + accessToken, "Content-Type": "application/json", "partner-software-name": "Gerenciador AzTeam", "partner-software-version": "2.0" } }, JSON.stringify(boletoBody), certPem, keyPem);
