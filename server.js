@@ -341,7 +341,8 @@ const server = http.createServer(async (req, res) => {
         method: method || "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": "Bearer " + token
+          "Authorization": "Bearer " + token,
+          "X-Idempotency-Key": "pix_" + Date.now() + "_" + Math.random().toString(36).slice(2,10)
         }
       };
       const result = await new Promise((resolve, reject) => {
