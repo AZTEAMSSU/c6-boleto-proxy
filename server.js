@@ -82,6 +82,12 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === "GET" && req.url === "/debug") { json(res, 200, lastDebug); return; }
   if (req.method === "GET" && req.url === "/health") { json(res, 200, { status: "ok" }); return; }
+  if (req.method === "GET" && req.url === "/ip") {
+    https.get("https://api.ipify.org?format=json", (r) => {
+      let d = ""; r.on("data", (c) => d += c); r.on("end", () => { res.writeHead(200, {"Content-Type":"application/json"}); res.end(d); });
+    }).on("error", (e) => json(res, 500, { error: e.message }));
+    return;
+  }
 
   if (req.method === "POST" && req.url === "/shorten") {
     try {
