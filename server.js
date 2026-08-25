@@ -279,6 +279,55 @@ const server = http.createServer(async (req, res) => {
       json(res, 200, { success: true, status: result.status || "UNKNOWN", paid: result.status === "PAID", data: result });
     } catch (e) { lastDebug.errors.push({ ts: new Date().toISOString(), msg: e.message }); json(res, 500, { error: e.message }); }
 
+  } else if (req.method === "POST" && req.url === "/boleto-resend-email") {
+    try {
+      const d = await parseBody(req);
+      const { clientId, clientSecret, certPem, keyPem, externalRef, boletoMode } = d;
+      if (!clientId || !clientSecret || !certPem || !keyPem || !externalRef) return json(res, 400, { error: "Parametros incompletos" });
+      const accessToken = await getAccessToken(clientId, clientSecret, certPem, keyPem);
+      const apiPath = boletoMode === "v2" ? "/v2/bank_slips/" + externalRef + "/send-email" : "/v1/bank_slips/" + externalRef + "/send-email";
+      const headers = { Authorization: "Bearer " + accessToken, "Content-Type": "application/json" };
+      if (boletoMode === "v2") { headers["partner-software-name"] = "Gerenciador AzTeam"; headers["partner-software-version"] = "2.0"; }
+      lastDebug.requests.push({ ts: new Date().toISOString(), endpoint: "boleto-resend-email", body: JSON.stringify({ externalRef, boletoMode }) });
+      const r = await mtlsRequest({ hostname: HOST, port: 443, path: apiPath, method: "PUT", headers }, null, certPem, keyPem);
+      const rBody = typeof r.body === "string" ? r.body : r.body.toString();
+      lastDebug.requests.push({ ts: new Date().toISOString(), endpoint: "boleto-resend-email-response", status: r.status, body: rBody.substring(0, 500) });
+      if (r.status < 200 || r.status >= 300) { let msg; try { msg = JSON.parse(rBody).detail || JSON.parse(rBody).message || rBody; } catch(e) { msg = rBody; } return json(res, r.status, { error: "Erro reenviar email: " + r.status + " " + msg }); }
+      json(res, 200, { success: true, message: "Email reenviado" });
+    } catch (e) { lastDebug.errors.push({ ts: new Date().toISOString(), msg: e.message }); json(res, 500, { error: e.message }); }
+
+  } else if (req.method === "POST" && req.url === "/pagbank") {
+    try {
+      const d = await parseBody(req);
+      const { token, env, method, path, body } = d;
+      if (!token) return json(res, 400, { error: "Token PagBank obrigatorio" });
+      const baseUrl = env === "sandbox" ? "https://sandbox.api.pagseguro.com" : "https://api.pagseguro.com";
+      const targetPath = path || "/orders";
+      const opts = {
+        hostname: baseUrl.replace("https://", ""),
+        port: 443,
+        path: targetPath,
+        method: method || "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer " + token
+        }
+      };
+      const result = await new Promise((resolve, reject) => {
+        const r = https.request(opts, (res2) => {
+          let data = "";
+          res2.on("data", (c) => data += c);
+          res2.on("end", () => resolve({ status: res2.statusCode, body: data }));
+        });
+        r.on("error", reject);
+        r.setTimeout(30000, () => { r.destroy(); reject(new Error("Timeout")); });
+        if (body) r.write(typeof body === "string" ? body : JSON.stringify(body));
+        r.end();
+      });
+      res.writeHead(result.status, { "Content-Type": "application/json" });
+      res.end(result.body);
+    } catch (e) { json(res, 500, { error: e.message }); }
+
   } else {
     json(res, 404, { error: "Not found" });
   }
