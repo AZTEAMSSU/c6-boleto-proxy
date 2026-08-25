@@ -328,6 +328,37 @@ const server = http.createServer(async (req, res) => {
       res.end(result.body);
     } catch (e) { json(res, 500, { error: e.message }); }
 
+  } else if (req.method === "POST" && req.url === "/mercadopago") {
+    try {
+      const d = await parseBody(req);
+      const { token, method, path, body } = d;
+      if (!token) return json(res, 400, { error: "Token Mercado Pago obrigatorio" });
+      const targetPath = path || "/v1/payments";
+      const opts = {
+        hostname: "api.mercadopago.com",
+        port: 443,
+        path: targetPath,
+        method: method || "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer " + token
+        }
+      };
+      const result = await new Promise((resolve, reject) => {
+        const r = https.request(opts, (res2) => {
+          let data = "";
+          res2.on("data", (c) => data += c);
+          res2.on("end", () => resolve({ status: res2.statusCode, body: data }));
+        });
+        r.on("error", reject);
+        r.setTimeout(30000, () => { r.destroy(); reject(new Error("Timeout")); });
+        if (body) r.write(typeof body === "string" ? body : JSON.stringify(body));
+        r.end();
+      });
+      res.writeHead(result.status, { "Content-Type": "application/json" });
+      res.end(result.body);
+    } catch (e) { json(res, 500, { error: e.message }); }
+
   } else {
     json(res, 404, { error: "Not found" });
   }
