@@ -364,9 +364,13 @@ const server = http.createServer(async (req, res) => {
   } else if (req.method === "POST" && req.url === "/infinitepay-create") {
     try {
       const d = await parseBody(req);
-      const { handle, items, order_nsu, redirect_url, webhook_url } = d;
+      const { handle, amount, description, items: rawItems, order_nsu, redirect_url, webhook_url } = d;
       if (!handle) return json(res, 400, { error: "handle obrigatorio" });
-      if (!items || !items.length) return json(res, 400, { error: "items obrigatorio" });
+      let items = rawItems;
+      if (!items || !items.length) {
+        if (!amount) return json(res, 400, { error: "amount obrigatorio" });
+        items = [{ name: description || "Servico", price: parseFloat(amount) }];
+      }
       const payload = { handle, items, order_nsu: order_nsu || ("order_" + Date.now()) };
       if (redirect_url) payload.redirect_url = redirect_url;
       if (webhook_url) payload.webhook_url = webhook_url;
