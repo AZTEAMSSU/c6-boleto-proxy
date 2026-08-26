@@ -364,20 +364,24 @@ const server = http.createServer(async (req, res) => {
   } else if (req.method === "POST" && req.url === "/infinitepay-create") {
     try {
       const d = await parseBody(req);
-      const { handle, amount, description, items: rawItems, order_nsu, redirect_url, webhook_url } = d;
+      const { handle, amount, description, order_nsu, redirect_url, webhook_url } = d;
       if (!handle) return json(res, 400, { error: "handle obrigatorio" });
       if (!amount) return json(res, 400, { error: "amount obrigatorio" });
       const amountCents = Math.round(parseFloat(amount) * 100);
       const payload = {
-        origin_handle: handle,
+        handle: handle,
         order_nsu: order_nsu || ("order_" + Date.now()),
-        amount: amountCents,
-        payment_methods: ["pix"]
+        items: [{
+          quantity: 1,
+          price: amountCents,
+          description: description || "Servico"
+        }]
       };
       if (redirect_url) payload.redirect_url = redirect_url;
+      if (webhook_url) payload.webhook_url = webhook_url;
       const bodyStr = JSON.stringify(payload);
       const opts = {
-        hostname: "infinitepay.io",
+        hostname: "api.checkout.infinitepay.io",
         port: 443,
         path: "/links",
         method: "POST",
@@ -400,7 +404,7 @@ const server = http.createServer(async (req, res) => {
       }
       const parsed = JSON.parse(result.body);
       if (order_nsu) infinitePayStore[order_nsu] = { handle, createdAt: Date.now() };
-      json(res, 200, { success: true, url: parsed.url || "", order_nsu: payload.order_nsu });
+      json(res, 200, { success: true, url: parsed.checkout_url || parsed.url || "", order_nsu: payload.order_nsu });
     } catch (e) { lastDebug.errors.push({ ts: new Date().toISOString(), msg: e.message }); json(res, 500, { error: e.message }); }
 
   } else if (req.method === "POST" && req.url === "/infinitepay-webhook") {
@@ -437,7 +441,7 @@ const server = http.createServer(async (req, res) => {
         const payload = { handle, order_nsu, transaction_nsu: stored.transaction_nsu, slug: stored.slug };
         const bodyStr = JSON.stringify(payload);
         const opts = {
-          hostname: "infinitepay.io",
+          hostname: "api.checkout.infinitepay.io",
           port: 443,
           path: "/payment_check",
           method: "POST",
