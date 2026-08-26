@@ -377,7 +377,7 @@ const server = http.createServer(async (req, res) => {
       if (redirect_url) payload.redirect_url = redirect_url;
       const bodyStr = JSON.stringify(payload);
       const opts = {
-        hostname: "api.checkout.infinitepay.io",
+        hostname: "infinitepay.io",
         port: 443,
         path: "/links",
         method: "POST",
@@ -437,7 +437,7 @@ const server = http.createServer(async (req, res) => {
         const payload = { handle, order_nsu, transaction_nsu: stored.transaction_nsu, slug: stored.slug };
         const bodyStr = JSON.stringify(payload);
         const opts = {
-          hostname: "api.checkout.infinitepay.io",
+          hostname: "infinitepay.io",
           port: 443,
           path: "/payment_check",
           method: "POST",
