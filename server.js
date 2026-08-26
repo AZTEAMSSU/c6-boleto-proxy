@@ -366,14 +366,15 @@ const server = http.createServer(async (req, res) => {
       const d = await parseBody(req);
       const { handle, amount, description, items: rawItems, order_nsu, redirect_url, webhook_url } = d;
       if (!handle) return json(res, 400, { error: "handle obrigatorio" });
-      let items = rawItems;
-      if (!items || !items.length) {
-        if (!amount) return json(res, 400, { error: "amount obrigatorio" });
-        items = [{ name: description || "Servico", price: parseFloat(amount) }];
-      }
-      const payload = { handle, items, order_nsu: order_nsu || ("order_" + Date.now()) };
+      if (!amount) return json(res, 400, { error: "amount obrigatorio" });
+      const amountCents = Math.round(parseFloat(amount) * 100);
+      const payload = {
+        origin_handle: handle,
+        order_nsu: order_nsu || ("order_" + Date.now()),
+        amount: amountCents,
+        payment_methods: ["pix"]
+      };
       if (redirect_url) payload.redirect_url = redirect_url;
-      if (webhook_url) payload.webhook_url = webhook_url;
       const bodyStr = JSON.stringify(payload);
       const opts = {
         hostname: "api.checkout.infinitepay.io",
