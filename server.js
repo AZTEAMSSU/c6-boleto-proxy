@@ -84,6 +84,125 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "GET" && req.url === "/debug") { json(res, 200, lastDebug); return; }
   if (req.method === "GET" && req.url === "/health") { json(res, 200, { status: "ok" }); return; }
 
+  if (req.method === "POST" && req.url === "/infinitepay-create") {
+    try {
+      const d = await parseBody(req);
+      const { handle, amount, description, order_nsu, redirect_url, webhook_url } = d;
+      if (!handle) return json(res, 400, { error: "handle obrigatorio" });
+      if (!amount) return json(res, 400, { error: "amount obrigatorio" });
+      const amountCents = Math.round(parseFloat(amount) * 100);
+      const payload = {
+        handle: handle,
+        order_nsu: order_nsu || ("order_" + Date.now()),
+        items: [{
+          quantity: 1,
+          price: amountCents,
+          description: description || "Servico"
+        }]
+      };
+      if (redirect_url) payload.redirect_url = redirect_url;
+      if (webhook_url) payload.webhook_url = webhook_url;
+      const bodyStr = JSON.stringify(payload);
+      const opts = {
+        hostname: "api.checkout.infinitepay.io",
+        port: 443,
+        path: "/links",
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(bodyStr) }
+      };
+      const result = await new Promise((resolve, reject) => {
+        const r = https.request(opts, (res2) => {
+          let data = "";
+          res2.on("data", (c) => data += c);
+          res2.on("end", () => resolve({ status: res2.statusCode, body: data }));
+        });
+        r.on("error", reject);
+        r.setTimeout(30000, () => { r.destroy(); reject(new Error("Timeout")); });
+        r.write(bodyStr);
+        r.end();
+      });
+      lastDebug.requests.push({ ts: new Date().toISOString(), endpoint: "infinitepay-create", status: result.status, body: result.body.substring(0, 1000) });
+      if (result.status < 200 || result.status >= 300) {
+        return json(res, result.status, { error: "InfinityPay erro " + result.status + ": " + result.body });
+      }
+      const parsed = JSON.parse(result.body);
+      if (order_nsu) infinitePayStore[order_nsu] = { handle, createdAt: Date.now() };
+      json(res, 200, { success: true, url: parsed.checkout_url || parsed.url || "", order_nsu: payload.order_nsu });
+    } catch (e) { lastDebug.errors.push({ ts: new Date().toISOString(), msg: e.message }); json(res, 500, { error: e.message }); }
+    return;
+  }
+
+  if (req.method === "POST" && req.url === "/infinitepay-webhook") {
+    try {
+      const d = await parseBody(req);
+      lastDebug.requests.push({ ts: new Date().toISOString(), endpoint: "infinitepay-webhook", body: JSON.stringify(d).substring(0, 2000) });
+      const { order_nsu, transaction_nsu, invoice_slug, paid, capture_method, amount, paid_amount, receipt_url } = d;
+      if (order_nsu) {
+        infinitePayStore[order_nsu] = {
+          ...infinitePayStore[order_nsu],
+          transaction_nsu: transaction_nsu || "",
+          slug: invoice_slug || "",
+          paid: paid || false,
+          capture_method: capture_method || "",
+          amount: amount || 0,
+          paid_amount: paid_amount || 0,
+          receipt_url: receipt_url || "",
+          webhookReceivedAt: Date.now()
+        };
+      }
+      json(res, 200, { ok: true });
+    } catch (e) { json(res, 200, { ok: true }); }
+    return;
+  }
+
+  if (req.method === "POST" && req.url === "/infinitepay-check") {
+    try {
+      const d = await parseBody(req);
+      const { handle, order_nsu } = d;
+      if (!handle || !order_nsu) return json(res, 400, { error: "handle e order_nsu obrigatorios" });
+      const stored = infinitePayStore[order_nsu];
+      if (stored && stored.paid) {
+        return json(res, 200, { success: true, paid: true, amount: stored.amount, paid_amount: stored.paid_amount, capture_method: stored.capture_method, receipt_url: stored.receipt_url });
+      }
+      if (stored && stored.transaction_nsu && stored.slug) {
+        const payload = { handle, order_nsu, transaction_nsu: stored.transaction_nsu, slug: stored.slug };
+        const bodyStr = JSON.stringify(payload);
+        const opts = {
+          hostname: "api.checkout.infinitepay.io",
+          port: 443,
+          path: "/payment_check",
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(bodyStr) }
+        };
+        const result = await new Promise((resolve, reject) => {
+          const r = https.request(opts, (res2) => {
+            let data = "";
+            res2.on("data", (c) => data += c);
+            res2.on("end", () => resolve({ status: res2.statusCode, body: data }));
+          });
+          r.on("error", reject);
+          r.setTimeout(30000, () => { r.destroy(); reject(new Error("Timeout")); });
+          r.write(bodyStr);
+          r.end();
+        });
+        lastDebug.requests.push({ ts: new Date().toISOString(), endpoint: "infinitepay-check", status: result.status, body: result.body.substring(0, 1000) });
+        if (result.status >= 200 && result.status < 300) {
+          const parsed = JSON.parse(result.body);
+          if (parsed.paid) {
+            infinitePayStore[order_nsu].paid = true;
+            infinitePayStore[order_nsu].amount = parsed.amount;
+            infinitePayStore[order_nsu].paid_amount = parsed.paid_amount;
+            infinitePayStore[order_nsu].capture_method = parsed.capture_method;
+          }
+          return json(res, 200, { success: true, paid: parsed.paid || false, amount: parsed.amount || 0, capture_method: parsed.capture_method || "" });
+        }
+        return json(res, 200, { success: true, paid: false });
+      }
+      json(res, 200, { success: true, paid: false, pending_webhook: true });
+    } catch (e) { lastDebug.errors.push({ ts: new Date().toISOString(), msg: e.message }); json(res, 500, { error: e.message }); }
+    return;
+  }
+
   if (req.method === "POST" && req.url === "/shorten") {
     try {
       const d = await parseBody(req);
@@ -360,119 +479,6 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(result.status, { "Content-Type": "application/json" });
       res.end(result.body);
     } catch (e) { json(res, 500, { error: e.message }); }
-
-  } else if (req.method === "POST" && req.url === "/infinitepay-create") {
-    try {
-      const d = await parseBody(req);
-      const { handle, amount, description, order_nsu, redirect_url, webhook_url } = d;
-      if (!handle) return json(res, 400, { error: "handle obrigatorio" });
-      if (!amount) return json(res, 400, { error: "amount obrigatorio" });
-      const amountCents = Math.round(parseFloat(amount) * 100);
-      const payload = {
-        handle: handle,
-        order_nsu: order_nsu || ("order_" + Date.now()),
-        items: [{
-          quantity: 1,
-          price: amountCents,
-          description: description || "Servico"
-        }]
-      };
-      if (redirect_url) payload.redirect_url = redirect_url;
-      if (webhook_url) payload.webhook_url = webhook_url;
-      const bodyStr = JSON.stringify(payload);
-      const opts = {
-        hostname: "api.checkout.infinitepay.io",
-        port: 443,
-        path: "/links",
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(bodyStr) }
-      };
-      const result = await new Promise((resolve, reject) => {
-        const r = https.request(opts, (res2) => {
-          let data = "";
-          res2.on("data", (c) => data += c);
-          res2.on("end", () => resolve({ status: res2.statusCode, body: data }));
-        });
-        r.on("error", reject);
-        r.setTimeout(30000, () => { r.destroy(); reject(new Error("Timeout")); });
-        r.write(bodyStr);
-        r.end();
-      });
-      lastDebug.requests.push({ ts: new Date().toISOString(), endpoint: "infinitepay-create", status: result.status, body: result.body.substring(0, 1000) });
-      if (result.status < 200 || result.status >= 300) {
-        return json(res, result.status, { error: "InfinityPay erro " + result.status + ": " + result.body });
-      }
-      const parsed = JSON.parse(result.body);
-      if (order_nsu) infinitePayStore[order_nsu] = { handle, createdAt: Date.now() };
-      json(res, 200, { success: true, url: parsed.checkout_url || parsed.url || "", order_nsu: payload.order_nsu });
-    } catch (e) { lastDebug.errors.push({ ts: new Date().toISOString(), msg: e.message }); json(res, 500, { error: e.message }); }
-
-  } else if (req.method === "POST" && req.url === "/infinitepay-webhook") {
-    try {
-      const d = await parseBody(req);
-      lastDebug.requests.push({ ts: new Date().toISOString(), endpoint: "infinitepay-webhook", body: JSON.stringify(d).substring(0, 2000) });
-      const { order_nsu, transaction_nsu, invoice_slug, paid, capture_method, amount, paid_amount, receipt_url } = d;
-      if (order_nsu) {
-        infinitePayStore[order_nsu] = {
-          ...infinitePayStore[order_nsu],
-          transaction_nsu: transaction_nsu || "",
-          slug: invoice_slug || "",
-          paid: paid || false,
-          capture_method: capture_method || "",
-          amount: amount || 0,
-          paid_amount: paid_amount || 0,
-          receipt_url: receipt_url || "",
-          webhookReceivedAt: Date.now()
-        };
-      }
-      json(res, 200, { ok: true });
-    } catch (e) { json(res, 200, { ok: true }); }
-
-  } else if (req.method === "POST" && req.url === "/infinitepay-check") {
-    try {
-      const d = await parseBody(req);
-      const { handle, order_nsu } = d;
-      if (!handle || !order_nsu) return json(res, 400, { error: "handle e order_nsu obrigatorios" });
-      const stored = infinitePayStore[order_nsu];
-      if (stored && stored.paid) {
-        return json(res, 200, { success: true, paid: true, amount: stored.amount, paid_amount: stored.paid_amount, capture_method: stored.capture_method, receipt_url: stored.receipt_url });
-      }
-      if (stored && stored.transaction_nsu && stored.slug) {
-        const payload = { handle, order_nsu, transaction_nsu: stored.transaction_nsu, slug: stored.slug };
-        const bodyStr = JSON.stringify(payload);
-        const opts = {
-          hostname: "api.checkout.infinitepay.io",
-          port: 443,
-          path: "/payment_check",
-          method: "POST",
-          headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(bodyStr) }
-        };
-        const result = await new Promise((resolve, reject) => {
-          const r = https.request(opts, (res2) => {
-            let data = "";
-            res2.on("data", (c) => data += c);
-            res2.on("end", () => resolve({ status: res2.statusCode, body: data }));
-          });
-          r.on("error", reject);
-          r.setTimeout(30000, () => { r.destroy(); reject(new Error("Timeout")); });
-          r.write(bodyStr);
-          r.end();
-        });
-        lastDebug.requests.push({ ts: new Date().toISOString(), endpoint: "infinitepay-check", status: result.status, body: result.body.substring(0, 1000) });
-        if (result.status >= 200 && result.status < 300) {
-          const parsed = JSON.parse(result.body);
-          if (parsed.paid) {
-            infinitePayStore[order_nsu].paid = true;
-            infinitePayStore[order_nsu].amount = parsed.amount;
-            infinitePayStore[order_nsu].paid_amount = parsed.paid_amount;
-            infinitePayStore[order_nsu].capture_method = parsed.capture_method;
-          }
-          return json(res, 200, { success: true, paid: parsed.paid || false, amount: parsed.amount || 0, capture_method: parsed.capture_method || "" });
-        }
-        return json(res, 200, { success: true, paid: false });
-      }
-      json(res, 200, { success: true, paid: false, pending_webhook: true });
-    } catch (e) { lastDebug.errors.push({ ts: new Date().toISOString(), msg: e.message }); json(res, 500, { error: e.message }); }
 
   } else {
     json(res, 404, { error: "Not found" });
