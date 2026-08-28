@@ -271,8 +271,37 @@ const server = http.createServer(async (req, res) => {
         return json(res, result.status, { error: "s.php erro " + result.status });
       }
       const m = result.body.match(/href="([^"]+)"\s+target="_blank"[^>]*>([^<]+)<\/a>/);
-      const shortUrl = m && m[2] ? m[2].trim() : (m && m[1] ? m[1] : "");
-      json(res, 200, { shortUrl: shortUrl || url });
+      const shortLink = (m && m[2] ? m[2].trim() : (m && m[1] ? m[1] : "")).replace(/^https?:\/\//, "");
+      const codeMatch = shortLink.match(/[?&]c=([^&]+)/);
+      const code = codeMatch ? codeMatch[1] : "";
+      lastDebug.requests.push({ ts: new Date().toISOString(), endpoint: "shorten-sphp-code", code });
+      const shortUrl = code ? "https://c6-boleto-proxy.onrender.com/s/" + encodeURIComponent(code) : (m && m[2] ? m[2].trim() : url);
+      json(res, 200, { shortUrl, shortLink });
+    } catch (e) { lastDebug.errors.push({ ts: new Date().toISOString(), msg: e.message }); json(res, 500, { error: e.message }); }
+    return;
+  }
+
+  if (req.method === "GET" && req.url.startsWith("/s/")) {
+    const code = decodeURIComponent(req.url.split("/s/")[1] || "").split("?")[0].split("#")[0];
+    if (!code) { json(res, 400, { error: "code obrigatorio" }); return; }
+    try {
+      const result = await new Promise((resolve, reject) => {
+        const r = http.request({ hostname: "tssu.sytes.net", port: 80, path: "/s.php?c=" + encodeURIComponent(code), method: "GET" }, (res2) => {
+          let loc = res2.headers.location || "";
+          res2.resume();
+          res2.on("end", () => resolve({ status: res2.statusCode, location: loc }));
+        });
+        r.on("error", reject);
+        r.setTimeout(20000, () => { r.destroy(); reject(new Error("Timeout")); });
+        r.end();
+      });
+      lastDebug.requests.push({ ts: new Date().toISOString(), endpoint: "s-redirect", code, status: result.status, location: result.location });
+      if (result.status >= 300 && result.status < 400 && result.location) {
+        res.writeHead(302, { "Location": result.location });
+        res.end();
+      } else {
+        json(res, 404, { error: "link nao encontrado" });
+      }
     } catch (e) { lastDebug.errors.push({ ts: new Date().toISOString(), msg: e.message }); json(res, 500, { error: e.message }); }
     return;
   }
