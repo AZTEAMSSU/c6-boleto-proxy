@@ -248,6 +248,35 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === "POST" && req.url === "/shorten-sphp") {
+    try {
+      const d = await parseBody(req);
+      const { url } = d;
+      if (!url) return json(res, 400, { error: "url obrigatorio" });
+
+      const bodyStr = "url=" + encodeURIComponent(url);
+      const result = await new Promise((resolve, reject) => {
+        const r = http.request({ hostname: "gerenciador.sytes.net", port: 80, path: "/s.php", method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded", "Content-Length": Buffer.byteLength(bodyStr) } }, (res2) => {
+          let data = "";
+          res2.on("data", (c) => data += c);
+          res2.on("end", () => resolve({ status: res2.statusCode, body: data }));
+        });
+        r.on("error", reject);
+        r.setTimeout(20000, () => { r.destroy(); reject(new Error("Timeout")); });
+        r.write(bodyStr);
+        r.end();
+      });
+      lastDebug.requests.push({ ts: new Date().toISOString(), endpoint: "shorten-sphp", status: result.status, body: result.body.substring(0, 1000) });
+      if (result.status < 200 || result.status >= 300) {
+        return json(res, result.status, { error: "s.php erro " + result.status });
+      }
+      const m = result.body.match(/href="([^"]+)"\s+target="_blank"[^>]*>([^<]+)<\/a>/);
+      const shortUrl = m && m[2] ? m[2].trim() : (m && m[1] ? m[1] : "");
+      json(res, 200, { shortUrl: shortUrl || url });
+    } catch (e) { lastDebug.errors.push({ ts: new Date().toISOString(), msg: e.message }); json(res, 500, { error: e.message }); }
+    return;
+  }
+
   if (req.method === "GET" && req.url.startsWith("/shared/")) {
     const token = req.url.split("/shared/")[1];
     const entry = sharedPdfs[token];
